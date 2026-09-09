@@ -198,6 +198,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
                 common_actions.UninstallExtension("tuxcare-php"),
                 common_actions.PreserveMariadbConfig(),
                 common_actions.SubstituteSshPermitRootLoginConfigured(),
+                custom_actions.SetFirewalldAllowZoneDriftingOff(),
                 custom_actions.UseSystemResolveForLeappContainer(),
             ],
             "Handle plesk related services": [

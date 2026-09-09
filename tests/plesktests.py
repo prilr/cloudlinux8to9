@@ -14,7 +14,10 @@ from unittest import mock
 from pleskdistup.actions import RemovePleskComponents
 from pleskdistup.common import plesk
 
-from cloudlinux8to9.actions.plesk import RemovePleskComponentsWhenInstallerIsIdle
+from cloudlinux8to9.actions.plesk import (
+    RemovePleskComponentsWhenInstallerIsIdle,
+    SetFirewalldAllowZoneDriftingOff,
+)
 
 
 class TestWaitUntilInstallerIsIdle(unittest.TestCase):
@@ -81,6 +84,77 @@ class TestRemovedComponentsListFile(unittest.TestCase):
         act = RemovePleskComponentsWhenInstallerIsIdle(["webalizer"], "/tmp/state")
         self.assertEqual(act._removed_components_list_file,
                          "/tmp/state/plesk-dist-upgrade-RemovePleskComponents.txt")
+
+
+class TestSetFirewalldAllowZoneDriftingOff(unittest.TestCase):
+    """The one inhibitor a stock CloudLinux 8 + Plesk host hits.
+
+    AllowZoneDrifting=yes is the el8 default and leapp inhibits on it whenever
+    firewalld is enabled, so on a host with nothing else wrong the conversion
+    stops here.
+    """
+
+    # Exactly as it appears in /etc/firewalld/firewalld.conf on
+    # firewalld-0.9.11-12.el8_10, comment line included.
+    REAL_CONF = (
+        "# AllowZoneDrifting\n"
+        "# Older versions of firewalld had undocumented behavior known as\n"
+        "# \"zone drifting\".\n"
+        "# Possible values; \"yes\", \"no\"\n"
+        "# Default: yes\n"
+        "AllowZoneDrifting=yes\n"
+    )
+
+    def setUp(self):
+        self.act = SetFirewalldAllowZoneDriftingOff("/etc/firewalld/firewalld.conf")
+
+    def test_detects_the_stock_el8_configuration(self):
+        self.assertTrue(self.act._is_zone_drifting_allowed(self.REAL_CONF))
+
+    def test_rewrites_only_the_setting(self):
+        out = self.act._disable_zone_drifting(self.REAL_CONF)
+        self.assertIn("AllowZoneDrifting=no\n", out)
+        self.assertNotIn("AllowZoneDrifting=yes", out)
+        # The commented lines describe the option and must survive - in
+        # particular "# Default: yes", which a careless substitution eats.
+        self.assertIn("# Default: yes", out)
+        self.assertIn("# AllowZoneDrifting\n", out)
+
+    def test_tolerates_spacing(self):
+        self.assertTrue(self.act._is_zone_drifting_allowed("AllowZoneDrifting = yes\n"))
+        self.assertEqual(
+            self.act._disable_zone_drifting("  AllowZoneDrifting = yes  \n"),
+            "AllowZoneDrifting=no\n")
+
+    def test_already_off_is_not_a_match(self):
+        self.assertFalse(self.act._is_zone_drifting_allowed("AllowZoneDrifting=no\n"))
+
+    def test_a_commented_out_setting_is_not_a_match(self):
+        # Only the live setting counts; leapp reads the parsed value.
+        self.assertFalse(self.act._is_zone_drifting_allowed("# AllowZoneDrifting=yes\n"))
+
+    def test_not_required_when_firewalld_is_disabled(self):
+        # leapp's actor returns early for a disabled firewalld, so there is no
+        # inhibitor and no reason to touch the file.
+        with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_is_firewalld_enabled",
+                               return_value=False):
+            with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_read_conf",
+                                   return_value=self.REAL_CONF):
+                self.assertFalse(self.act._is_required())
+
+    def test_required_when_firewalld_is_enabled_and_drifting_allowed(self):
+        with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_is_firewalld_enabled",
+                               return_value=True):
+            with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_read_conf",
+                                   return_value=self.REAL_CONF):
+                self.assertTrue(self.act._is_required())
+
+    def test_not_required_when_there_is_no_config_file(self):
+        with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_is_firewalld_enabled",
+                               return_value=True):
+            with mock.patch.object(SetFirewalldAllowZoneDriftingOff, "_read_conf",
+                                   return_value=None):
+                self.assertFalse(self.act._is_required())
 
 
 if __name__ == "__main__":
