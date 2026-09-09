@@ -8,7 +8,6 @@ only shows up on a converted machine, hours in and past the point of no return.
 These tests pin that side down.
 """
 import sys
-import typing
 import unittest
 from unittest import mock
 
