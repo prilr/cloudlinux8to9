@@ -317,12 +317,37 @@ class AdoptRepositories(action.ActiveAction):
                 leapp_configs.adopt_repositories(path,
                                                 do_adapt_repository=partial(get_adapted_repository, keep_id=False))
 
+    POST_UPDATE_FAILED_MSG = """The post-conversion 'dnf update' did not finish. The system has been
+converted, but at least one repository could not be used - most often one that
+was pinned to the old release and has no counterpart under the new one.
+Check 'dnf repolist' and /var/log/plesk/cloudlinux8to9.log, fix or remove the
+repository, and run 'dnf update' by hand.
+"""
+
     def _post_action(self) -> action.ActionResult:
         self._use_rpmnew_repositories()
         self._adopt_plesk_repositories()
         self._adopt_base_repository()
-        util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
-        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
+        try:
+            util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
+            util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
+        except Exception as e:
+            # dnf fails the whole command when ANY enabled repository cannot be
+            # reached, and a Plesk server carries plenty of third-party
+            # repositories this conversion does not know how to remap - so one
+            # of them 404ing once the release version changes is an ordinary
+            # outcome, not an exceptional one. Seen on a real conversion, where
+            # a leftover repository pinned to the old release asked for
+            # .../9.8/cloudlinux-x86_64-server-8/ and got a 404.
+            #
+            # Letting that abort the finish stage strands the host: the actions
+            # that restore Plesk have not run yet, and this side of the reboot
+            # cannot be reverted. The framework's own contract for _post_action
+            # is that failures here are best-effort recovery - log clearly and
+            # keep going - so report it loudly and carry on rather than leaving
+            # the server without its control panel.
+            log.err(f"Post-conversion 'dnf update' failed: {e}")
+            motd.add_finish_ssh_login_message(self.POST_UPDATE_FAILED_MSG)
         return action.ActionResult()
 
     def _revert_action(self) -> action.ActionResult:
