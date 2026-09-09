@@ -312,9 +312,14 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             custom_actions.AssertNoMoreThenOneKernelNamedNIC(),
             custom_actions.AssertRedHatKernelInstalled(),
             custom_actions.AssertLastInstalledKernelInUse(),
+            # The stock media repo is a local repository leapp tolerates, so it is
+            # not a reason to inhibit. CloudLinux ships no such file of its own,
+            # but a CloudLinux 8 host draws its base content from AlmaLinux and
+            # can carry AlmaLinux's - so skip either spelling rather than
+            # renaming upstream's exclusion into one that never matches.
             common_actions.AssertLocalRepositoryNotPresent(file_list = [
                     file for file in files.find_files_case_insensitive("/etc/yum.repos.d", "*.repo")
-                    if os.path.basename(file) != "CloudLinux-Media.repo"
+                    if os.path.basename(file) not in ("CloudLinux-Media.repo", "AlmaLinux-Media.repo")
                  ]),
             common_actions.AssertIPRepositoryNotPresent(),
             custom_actions.CheckNMUnreachableDevices(),
