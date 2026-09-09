@@ -3,6 +3,8 @@
 import unittest
 from unittest import mock
 
+from pleskdistup.common import util
+
 from cloudlinux8to9.actions.packages import SwitchClnChannel
 
 
@@ -39,6 +41,32 @@ class TestSwitchClnChannel(unittest.TestCase):
         act = SwitchClnChannel()
         with mock.patch("os.path.exists", return_value=False):
             self.assertFalse(act.is_required())
+
+
+class TestSwitchClnChannelRevert(unittest.TestCase):
+    """The revert has to guard itself, not only rely on _is_required.
+
+    RevertActionsFlow._is_action_required runs any action its stored state
+    marks as SUCCESS whatever is_required now answers, and _prepare_action here
+    succeeds trivially. So state written by a build without the guard - or a
+    host that lost the CLN tooling between prepare and revert, which a
+    conversion can well do - still reaches _revert_action.
+    """
+
+    def test_revert_is_a_no_op_without_the_cln_tool(self):
+        act = SwitchClnChannel()
+        with mock.patch("os.path.exists", return_value=False):
+            with mock.patch.object(util, "logged_check_call") as call:
+                act._revert_action()
+        call.assert_not_called()
+
+    def test_revert_moves_the_channel_back_to_8_when_it_can(self):
+        act = SwitchClnChannel()
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch.object(util, "logged_check_call") as call:
+                act._revert_action()
+        self.assertEqual(call.call_args_list[0][0][0],
+                         ["/usr/sbin/cln-switch-channel", "-t", "8", "-o", "-f"])
 
 
 if __name__ == "__main__":

@@ -355,6 +355,15 @@ class SwitchClnChannel(action.ActiveAction):
         return action.ActionResult()
 
     def _revert_action(self) -> action.ActionResult:
+        # Guarded here as well as in _is_required: the revert flow runs any
+        # action its stored state marks as succeeded, whatever is_required now
+        # says, and _prepare_action succeeds trivially. So state written by a
+        # build without the guard - or a host that lost the CLN tooling between
+        # prepare and revert, which a conversion can well do - would still get
+        # here.
+        if not os.path.exists(self.CLN_SWITCH_CHANNEL_BIN):
+            log.info(f"{self.CLN_SWITCH_CHANNEL_BIN!r} is not present, there is no CLN channel to move back")
+            return action.ActionResult()
         util.logged_check_call([self.CLN_SWITCH_CHANNEL_BIN, "-t", "8", "-o", "-f"])
         # Probably not really needed, but that's the way forward leapp logic is set up
         util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
