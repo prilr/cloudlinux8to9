@@ -165,6 +165,25 @@ class PostgresDatabasesUpdate(action.ActiveAction):
         return action.ActionResult()
 
     def _upgrade_database(self) -> None:
+        # _is_required() is evaluated when the action flow is BUILT - on the
+        # source system, where PostgreSQL is still older - and the answer is
+        # stored in actions.json. On a resume the stored plan still says
+        # "required", so without this check the upgrade is attempted again
+        # against a data directory that is already current, and
+        # `postgresql-setup --upgrade` exits non-zero and fails the finish
+        # stage. Seen on a conversion whose upgrade had actually SUCCEEDED.
+        #
+        # The finish stage is resumable by design - it runs from a systemd unit
+        # after a reboot, and the tool tells the administrator to re-run it
+        # after fixing anything - so an action that cannot be re-run turns a
+        # recoverable interruption into a manual one.
+        if not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION):
+            log.info(
+                "PostgreSQL data directory is already at version "
+                f"{_ALMA9_POSTGRES_VERSION} or later; nothing to upgrade."
+            )
+            return
+
         util.logged_check_call(['dnf', 'install', '-y', 'postgresql-upgrade'])
 
         util.logged_check_call(['postgresql-setup', '--upgrade'])
