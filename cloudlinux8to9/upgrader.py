@@ -23,8 +23,10 @@ dist.register_distro("CloudLinux", "9", dist.CloudLinux("9"))
 # os-release against the mapping we just extended.
 dist.get_distro.cache_clear()
 
-import cloudlinux8to9.config
-from cloudlinux8to9 import actions as custom_actions
+# Deliberately below the registration above, so nothing here can resolve the
+# distribution before CloudLinux 9 is a known one.
+import cloudlinux8to9.config  # noqa: E402
+from cloudlinux8to9 import actions as custom_actions  # noqa: E402
 
 
 class CloudLinux8to9Upgrader(DistUpgrader):
