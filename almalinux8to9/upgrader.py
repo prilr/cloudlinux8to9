@@ -10,11 +10,11 @@ from pleskdistup.phase import Phase
 from pleskdistup.messages import REBOOT_WARN_MESSAGE
 from pleskdistup.upgrader import DistUpgrader, DistUpgraderFactory, PathType
 
-import almalinux8to9.config
-from almalinux8to9 import actions as custom_actions
+import cloudlinux8to9.config
+from cloudlinux8to9 import actions as custom_actions
 
 
-class AlmaLinux8to9Upgrader(DistUpgrader):
+class CloudLinux8to9Upgrader(DistUpgrader):
     _distro_from = dist.AlmaLinux("8")
     _distro_to = dist.AlmaLinux("9")
 
@@ -65,17 +65,17 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
 
     @property
     def upgrader_name(self) -> str:
-        return "Plesk::AlmaLinux8to9Upgrader"
+        return "Plesk::CloudLinux8to9Upgrader"
 
     @property
     def upgrader_version(self) -> str:
-        if almalinux8to9.config.version:
-            return almalinux8to9.config.version + "-" + almalinux8to9.config.revision[:8]
-        return almalinux8to9.config.revision
+        if cloudlinux8to9.config.version:
+            return cloudlinux8to9.config.version + "-" + cloudlinux8to9.config.revision[:8]
+        return cloudlinux8to9.config.revision
 
     @property
     def issues_url(self) -> str:
-        return "https://github.com/plesk/almalinux8to9/issues"
+        return "https://github.com/plesk/cloudlinux8to9/issues"
 
     def prepare_feedback(
         self,
@@ -225,7 +225,7 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             "Do convert": [
                 custom_actions.DisableBaseRepoUpdatesRepository(),
                 custom_actions.RemovePleskBaseRepository(),
-                custom_actions.DoAlmaLinux8to9Convert(),
+                custom_actions.DoCloudLinux8to9Convert(),
             ],
             "Resume": [
                 common_actions.RestoreInProgressSshLoginMessage(new_os),
@@ -261,7 +261,7 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             actions_map = util.merge_dicts_of_lists(actions_map, {
                 "Pause before reboot": [
                     common_actions.PreRebootPause(
-                        REBOOT_WARN_MESSAGE.format(delay=self._pre_reboot_delay, util_name="almalinux8to9"),
+                        REBOOT_WARN_MESSAGE.format(delay=self._pre_reboot_delay, util_name="cloudlinux8to9"),
                         self._pre_reboot_delay
                     ),
                 ]
@@ -360,8 +360,8 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             checks.append(custom_actions.AssertThereIsNoUnknownPerlCpanModules())
         if not self.disable_spamassasin_plugins:
             checks.append(common_actions.AssertSpamassassinAdditionalPluginsDisabled())
-        if not self.allow_old_script_version and almalinux8to9.config.version:
-            checks.append(common_actions.AssertScriptVersionUpToDate("https://github.com/plesk/almalinux8to9", "almalinux8to9", version.DistupgradeToolVersion(almalinux8to9.config.version)))
+        if not self.allow_old_script_version and cloudlinux8to9.config.version:
+            checks.append(common_actions.AssertScriptVersionUpToDate("https://github.com/plesk/cloudlinux8to9", "cloudlinux8to9", version.DistupgradeToolVersion(cloudlinux8to9.config.version)))
         if not any(packages.is_package_installed(name) for name in self._sha1_only_packages):
             checks.append(
                 custom_actions.AssertNoOldRPMSignatures(not self.rm_sha1_plesk_packages))
@@ -456,7 +456,7 @@ the log file.
         self.skip_space_checks = options.skip_space_checks
 
 
-class AlmaLinux8to9Factory(DistUpgraderFactory):
+class CloudLinux8to9Factory(DistUpgraderFactory):
     def __init__(self):
         super().__init__()
 
@@ -471,11 +471,11 @@ class AlmaLinux8to9Factory(DistUpgraderFactory):
         from_system: typing.Optional[dist.Distro] = None,
         to_system: typing.Optional[dist.Distro] = None
     ) -> bool:
-        return AlmaLinux8to9Upgrader.supports(from_system, to_system)
+        return CloudLinux8to9Upgrader.supports(from_system, to_system)
 
     @property
     def upgrader_name(self) -> str:
-        return "Plesk::AlmaLinux8to9Upgrader"
+        return "Plesk::CloudLinux8to9Upgrader"
 
     def create_upgrader(self, *args, **kwargs) -> DistUpgrader:
-        return AlmaLinux8to9Upgrader(*args, **kwargs)
+        return CloudLinux8to9Upgrader(*args, **kwargs)

@@ -80,7 +80,7 @@ class UpdateModernMariadb(RemoveReplacePackages):
     def __init__(self) -> None:
         super().__init__(
             {"perl-DBD-MySQL": "perl-DBD-MariaDB"},
-            "/usr/local/psa/var/almalinux8to9/dist-upgrader-mariadb.list",
+            "/usr/local/psa/var/cloudlinux8to9/dist-upgrader-mariadb.list",
             "update modern MariaDB")
 
     def _is_required(self) -> bool:

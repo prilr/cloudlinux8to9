@@ -182,7 +182,7 @@ class ReinstallConflictPackages(action.ActiveAction):
 
     def __init__(self, temp_directory: str):
         self.name = "re-installing common conflict packages"
-        self.removed_packages_file = temp_directory + "/almalinux8to9_removed_packages.txt"
+        self.removed_packages_file = temp_directory + "/cloudlinux8to9_removed_packages.txt"
         self.conflict_pkgs_map = {
             "python36-argcomplete": "python3-argcomplete",
             "python36-cffi": "python3-cffi",

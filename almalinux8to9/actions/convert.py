@@ -22,7 +22,7 @@ class LeappPreupgradeRisksPreventedException(Exception):
         return f"{super().__str__()}\n{original_exception_str}The preventing factors are:\n{inhibitors_str}"
 
 
-class DoAlmaLinux8to9Convert(action.ActiveAction):
+class DoCloudLinux8to9Convert(action.ActiveAction):
     LEAPP_RESUME_SERVICE = "leapp_resume.service"
     leapp_ovl_size: int
 
