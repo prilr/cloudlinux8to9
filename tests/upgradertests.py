@@ -7,6 +7,8 @@ Nothing in the start stage exercises the CloudLinux 9 side, so a mistake there
 only shows up on a converted machine, hours in and past the point of no return.
 These tests pin that side down.
 """
+import os
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -54,6 +56,49 @@ class TestCloudLinux9IsKnown(unittest.TestCase):
     def test_cloudlinux8_is_still_known(self):
         with _detected_os("CloudLinux", "8.10"):
             self.assertEqual(dist.get_distro(), dist.CloudLinux("8"))
+
+
+class TestImportLeavesNothingMemoised(unittest.TestCase):
+    """Importing the upgrader must not leave a stale get_distro() answer behind.
+
+    Registering CloudLinux 9 is only half the job. get_distro() is lru_cached
+    and pleskdistup.common.src.systemd resolves it at module scope, so by the
+    time the upgrader's own module body runs the framework has already answered
+    "UnknownDistro" and memoised it - and every later caller, including
+    pleskdistup.main's isinstance(distro, UnknownDistro) bail-out, gets that
+    answer no matter what the mapping now says.
+
+    This asserts on the real, unpatched cache in a FRESH interpreter on purpose.
+    The behavioural tests below patch os-release detection and clear the cache
+    themselves, which hides exactly this failure: they passed against a build
+    that still answered UnknownDistro on a real CloudLinux 9 host.
+    """
+
+    def test_get_distro_is_not_memoised_after_import(self):
+        code = (
+            "import cloudlinux8to9.upgrader\n"
+            "from pleskdistup.common import dist\n"
+            "print(dist.get_distro.cache_info().currsize)\n"
+        )
+        env = dict(os.environ)
+        # Works both from a source checkout and from inside the buck-built pex.
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+        out = subprocess.check_output([sys.executable, "-c", code], env=env)
+        self.assertEqual(
+            out.decode().strip(), "0",
+            "cloudlinux8to9.upgrader left a memoised get_distro() answer, which "
+            "predates the CloudLinux 9 registration and shadows it")
+
+    def test_cloudlinux9_is_in_the_mapping_after_import(self):
+        code = (
+            "import cloudlinux8to9.upgrader\n"
+            "from pleskdistup.common import dist\n"
+            "print(('CloudLinux', '9') in dist._distro_mapping)\n"
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+        out = subprocess.check_output([sys.executable, "-c", code], env=env)
+        self.assertEqual(out.decode().strip(), "True")
 
 
 class TestUpgraderSupports(unittest.TestCase):

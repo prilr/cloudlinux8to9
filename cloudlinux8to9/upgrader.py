@@ -10,15 +10,21 @@ from pleskdistup.phase import Phase
 from pleskdistup.messages import REBOOT_WARN_MESSAGE
 from pleskdistup.upgrader import DistUpgrader, DistUpgraderFactory, PathType
 
+# The dist-upgrader framework knows CloudLinux only up to 8, so on the converted
+# system get_distro() answers UnknownDistro: pleskdistup.main refuses to run at
+# all on one, and the rpm/deb dispatch in pleskdistup.common.packages reads its
+# rhel_based as False. That is the finish stage, i.e. past the point of no
+# return, so it has to be right before the first boot of CloudLinux 9.
+dist.register_distro("CloudLinux", "9", dist.CloudLinux("9"))
+# Registering is not enough on its own. get_distro() is lru_cached and
+# pleskdistup.common.src.systemd resolves it at MODULE scope to pick its
+# systemctl paths, so the import above has already answered the question and
+# memoised UnknownDistro. Drop that answer so the next caller re-reads
+# os-release against the mapping we just extended.
+dist.get_distro.cache_clear()
+
 import cloudlinux8to9.config
 from cloudlinux8to9 import actions as custom_actions
-
-
-# The dist-upgrader framework does not know CloudLinux 9 yet, so get_distro()
-# would return UnknownDistro on the converted system and pleskdistup.main would
-# refuse to run the finish stage. Register it here, at import time of the
-# upgrader, i.e. before anything can call (and lru_cache) get_distro().
-dist.register_distro("CloudLinux", "9", dist.CloudLinux("9"))
 
 
 class CloudLinux8to9Upgrader(DistUpgrader):
