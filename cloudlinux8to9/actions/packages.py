@@ -8,6 +8,7 @@ from functools import partial
 from pleskdistup.common import action, files, leapp_configs, log, motd, packages, plesk, rpm, systemd, util
 from .common import get_adapted_repository
 from .common_checks import AssertNoOldRPMSignatures
+from .plesk import WaitsForIdleInstaller
 
 BASE_REPO_PATHS = ["/etc/yum.repos.d/base.repo", "/etc/yum.repos.d/cloudlinux-base.repo"]
 
@@ -174,6 +175,37 @@ class ReinstallRoundcubePleskComponents(action.ActiveAction):
 
     def estimate_revert_time(self):
         return 3 * 60
+
+
+class ReinstallRoundcubePleskComponentsWhenInstallerIsIdle(
+    WaitsForIdleInstaller, ReinstallRoundcubePleskComponents
+):
+    """The roundcube reinstall, made to survive a lingering installer lock.
+
+    is_required() shells out to the installer, and the flow builder evaluates it
+    for every action BEFORE any action runs - so there is no earlier action that
+    could have waited on our behalf. A lock still held from the preceding phase
+    therefore kills the conversion during construction:
+
+        Failed: re-installing roundcube plesk components. The reason:
+        Plesk installer is busy: ... BUSY state: exit status 1
+
+    The component listing the wait already fetched answers is_required(), so the
+    installer is asked once rather than twice with a fresh race in between.
+    """
+
+    def is_required(self) -> bool:
+        components = self._wait_until_installer_is_idle()
+        component = components.get("roundcube")
+        return component is not None and component.is_installed
+
+    def _post_action(self) -> action.ActionResult:
+        self._wait_until_installer_is_idle()
+        return super()._post_action()
+
+    def _revert_action(self) -> action.ActionResult:
+        self._wait_until_installer_is_idle()
+        return super()._revert_action()
 
 
 class ReinstallConflictPackages(action.ActiveAction):

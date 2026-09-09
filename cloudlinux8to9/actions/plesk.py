@@ -9,7 +9,38 @@ from pleskdistup import actions as common_actions
 from pleskdistup.common import action, files, log, plesk, systemd
 
 
-class RemovePleskComponentsWhenInstallerIsIdle(common_actions.RemovePleskComponents):
+class WaitsForIdleInstaller:
+    """Poll the Plesk installer until it stops reporting BUSY.
+
+    Shared by every action that drives or queries the installer after another
+    action has already run it. The framework models the state we wait on:
+    list_installed_components() raises PleskInstallerBusy for exactly this
+    stdout.
+    """
+
+    idle_poll_interval: int = 15
+    idle_timeout: int = 900
+
+    def _wait_until_installer_is_idle(self) -> typing.Dict[str, typing.Any]:
+        """Return the component listing once the installer is free.
+
+        The listing is returned rather than discarded so a caller that wants it
+        - is_required(), typically - does not have to ask a second time and race
+        the lock all over again.
+        """
+        deadline = time.time() + self.idle_timeout
+        while True:
+            try:
+                return plesk.list_installed_components()
+            except plesk.PleskInstallerBusy as e:
+                if time.time() >= deadline:
+                    log.err(f"Plesk installer still busy after {self.idle_timeout}s: {e}")
+                    raise
+                log.info(f"Plesk installer is busy, waiting {self.idle_poll_interval}s: {e}")
+                time.sleep(self.idle_poll_interval)
+
+
+class RemovePleskComponentsWhenInstallerIsIdle(WaitsForIdleInstaller, common_actions.RemovePleskComponents):
     """RemovePleskComponents that waits out a lingering Plesk installer lock.
 
     UpdatePlesk runs the Plesk installer earlier in the same conversion, and on
@@ -30,9 +61,6 @@ class RemovePleskComponentsWhenInstallerIsIdle(common_actions.RemovePleskCompone
     the removal.
     """
 
-    idle_poll_interval: int = 15
-    idle_timeout: int = 900
-
     @property
     def _removed_components_list_file(self) -> str:
         # Upstream derives this from the class name, so subclassing would
@@ -40,19 +68,6 @@ class RemovePleskComponentsWhenInstallerIsIdle(common_actions.RemovePleskCompone
         # reinstall that undoes it have to agree on where the list lives, even
         # across a resume by a build that used the stock action.
         return os.path.join(self.state_dir, "plesk-dist-upgrade-RemovePleskComponents.txt")
-
-    def _wait_until_installer_is_idle(self) -> None:
-        deadline = time.time() + self.idle_timeout
-        while True:
-            try:
-                plesk.list_installed_components()
-                return
-            except plesk.PleskInstallerBusy as e:
-                if time.time() >= deadline:
-                    log.err(f"Plesk installer still busy after {self.idle_timeout}s: {e}")
-                    raise
-                log.info(f"Plesk installer is busy, waiting {self.idle_poll_interval}s: {e}")
-                time.sleep(self.idle_poll_interval)
 
     def _prepare_action(self) -> action.ActionResult:
         self._wait_until_installer_is_idle()

@@ -213,7 +213,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
                 custom_actions.FixOsVendorPhpFpmConfiguration(),
                 common_actions.RebundleRubyApplications(),
                 custom_actions.ReinstallPhpmyadminPleskComponents(),
-                custom_actions.ReinstallRoundcubePleskComponents(),
+                custom_actions.ReinstallRoundcubePleskComponentsWhenInstallerIsIdle(),
                 custom_actions.ReinstallConflictPackages(options.state_dir),
                 custom_actions.ReinstallPerlCpanModules(options.state_dir),
                 common_actions.DisableSuspiciousKernelModules(),

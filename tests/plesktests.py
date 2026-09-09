@@ -159,3 +159,69 @@ class TestSetFirewalldAllowZoneDriftingOff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRoundcubeReinstallWaitsOutTheLock(unittest.TestCase):
+    """is_required() queries the installer, so it can lose the same race.
+
+    The removal was guarded and the reinstall was not, and the gap is not in an
+    action body but in `is_required()`: it calls plesk.is_component_installed(),
+    which shells out to the installer and raises PleskInstallerBusy. The flow
+    builder evaluates is_required() for every action before any of them runs, so
+    a lingering lock kills the conversion during construction, before a single
+    action has had the chance to wait for anything:
+
+        ERROR - cloudlinux8to9 process has failed. Error: Failed: re-installing
+        roundcube plesk components. The reason: Plesk installer is busy:
+        Plesk installer command failed with BUSY state: exit status 1
+
+    Observed on a CloudLinux 8.10 + Plesk 18.0.80 host converting with
+    cl-MariaDB106, where the preceding phase had just driven the installer.
+    """
+
+    def setUp(self):
+        from cloudlinux8to9.actions.packages import (
+            ReinstallRoundcubePleskComponentsWhenInstallerIsIdle,
+        )
+        self.act = ReinstallRoundcubePleskComponentsWhenInstallerIsIdle()
+        self.act.idle_poll_interval = 0
+
+    def _components(self, installed):
+        comp = mock.Mock()
+        comp.is_installed = installed
+        return {"roundcube": comp}
+
+    def test_is_required_waits_out_a_lingering_lock(self):
+        probe = mock.Mock(side_effect=[
+            plesk.PleskInstallerBusy("Update operation was locked by another update process."),
+            self._components(True),
+        ])
+        with mock.patch.object(plesk, "list_installed_components", probe):
+            with mock.patch("time.sleep"):
+                self.assertTrue(self.act.is_required())
+        self.assertEqual(probe.call_count, 2)
+
+    def test_is_required_still_answers_no_when_roundcube_is_absent(self):
+        with mock.patch.object(plesk, "list_installed_components", return_value={}):
+            self.assertFalse(self.act.is_required())
+
+    def test_a_non_busy_failure_is_not_swallowed(self):
+        # A broken installer must still fail the conversion, loudly.
+        with mock.patch.object(plesk, "list_installed_components",
+                               side_effect=RuntimeError("installer is broken")):
+            with self.assertRaises(RuntimeError):
+                self.act.is_required()
+
+    def test_the_reinstall_waits_before_driving_the_installer(self):
+        calls = []
+        with mock.patch.object(self.act, "_wait_until_installer_is_idle",
+                               side_effect=lambda: calls.append("wait")):
+            # patch.object on the module, not a dotted string: the package's
+            # star-import rebinds these names, and mock.patch("...packages.util...")
+            # raises ModuleNotFoundError trying to walk the path.
+            import importlib
+            pkg_action = importlib.import_module("cloudlinux8to9.actions.packages")
+            with mock.patch.object(pkg_action.util, "logged_check_call",
+                                   side_effect=lambda *a, **k: calls.append("installer")):
+                self.act._post_action()
+        self.assertEqual(calls, ["wait", "installer"])
