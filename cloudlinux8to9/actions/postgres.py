@@ -31,6 +31,47 @@ class AssertOutdatedPostgresNotInstalled(action.CheckAction):
         return not postgres.is_postgres_installed() or not postgres.is_database_initialized() or not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION)
 
 
+# What CloudLinux 9's postgresql-upgrade package carries: it ships only
+# /usr/lib64/pgsql/postgresql-12/bin, so `postgresql-setup --upgrade` can bring
+# a version 12 datadir to 13 and nothing older.
+_POSTGRES_UPGRADE_REACHES_BACK_TO = 12
+
+
+class AssertPostgresDatabaseIsUpgradable(action.CheckAction):
+    """Refuse --upgrade-postgres when it could not actually deliver.
+
+    --upgrade-postgres waives AssertOutdatedPostgresNotInstalled and defers the
+    work to PostgresDatabasesUpdate, which runs `postgresql-setup --upgrade`
+    AFTER the conversion. That reaches exactly one major version back, so a
+    datadir older than 12 converts and only then fails:
+
+        ERROR: Cannot upgrade because the database in /var/lib/pgsql/data is of
+               version 10 but it should be 12
+
+    which is past the point of no return, with PostgreSQL left unusable. And 10
+    is the DEFAULT stream of el8's postgresql module, so it is the common case,
+    not an unlucky one. Say so beforehand, while the administrator can still act.
+    """
+
+    def __init__(self) -> None:
+        self.name = "checking the PostgreSQL database can be upgraded on the target"
+        self.description = f"""The PostgreSQL data directory is too old to be upgraded during the conversion.
+	'postgresql-setup --upgrade' on {_ALMA9_POSTGRES_VERSION} upgrades a version {_POSTGRES_UPGRADE_REACHES_BACK_TO} database and no older one,
+	so --upgrade-postgres cannot do anything for this server and PostgreSQL would be
+	left unusable after the conversion.
+	Upgrade PostgreSQL to version {_POSTGRES_UPGRADE_REACHES_BACK_TO} or later before converting, and back your databases up first.
+"""
+
+    def _do_check(self) -> bool:
+        if not postgres.is_postgres_installed() or not postgres.is_database_initialized():
+            return True
+        if not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION):
+            # Already at or beyond the target version, so nothing will try to
+            # upgrade it.
+            return True
+        return not postgres.is_database_major_version_lower(_POSTGRES_UPGRADE_REACHES_BACK_TO)
+
+
 class AssertPostgresLocaleMatchesSystemOne(action.CheckAction):
     def __init__(self):
         self.name = "checking if system locale is safe for Postgres databases upgrade"

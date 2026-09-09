@@ -380,6 +380,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             checks.append(custom_actions.AssertOutdatedPostgresNotInstalled())
         else:
             checks.append(custom_actions.AssertPostgresLocaleMatchesSystemOne())
+            checks.append(custom_actions.AssertPostgresDatabaseIsUpgradable())
         if not self.remove_unknown_perl_modules:
             checks.append(custom_actions.AssertThereIsNoUnknownPerlCpanModules())
         if not self.disable_spamassasin_plugins:
