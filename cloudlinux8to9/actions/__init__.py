@@ -9,5 +9,6 @@ from .network_manager import *
 from .packages import *
 from .perl import *
 from .php import *
+from .plesk import *
 from .postgres import *
 from .stattools import *
