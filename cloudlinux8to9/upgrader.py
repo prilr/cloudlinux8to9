@@ -10,17 +10,33 @@ from pleskdistup.phase import Phase
 from pleskdistup.messages import REBOOT_WARN_MESSAGE
 from pleskdistup.upgrader import DistUpgrader, DistUpgraderFactory, PathType
 
-import almalinux8to9.config
-from almalinux8to9 import actions as custom_actions
+# The dist-upgrader framework knows CloudLinux only up to 8, so on the converted
+# system get_distro() answers UnknownDistro: pleskdistup.main refuses to run at
+# all on one, and the rpm/deb dispatch in pleskdistup.common.packages reads its
+# rhel_based as False. That is the finish stage, i.e. past the point of no
+# return, so it has to be right before the first boot of CloudLinux 9.
+dist.register_distro("CloudLinux", "9", dist.CloudLinux("9"))
+# Registering is not enough on its own. get_distro() is lru_cached and
+# pleskdistup.common.src.systemd resolves it at MODULE scope to pick its
+# systemctl paths, so the import above has already answered the question and
+# memoised UnknownDistro. Drop that answer so the next caller re-reads
+# os-release against the mapping we just extended.
+dist.get_distro.cache_clear()
+
+# Deliberately below the registration above, so nothing here can resolve the
+# distribution before CloudLinux 9 is a known one.
+import cloudlinux8to9.config  # noqa: E402
+from cloudlinux8to9 import actions as custom_actions  # noqa: E402
 
 
-class AlmaLinux8to9Upgrader(DistUpgrader):
-    _distro_from = dist.AlmaLinux("8")
-    _distro_to = dist.AlmaLinux("9")
+class CloudLinux8to9Upgrader(DistUpgrader):
+    _distro_from = dist.CloudLinux("8")
+    _distro_to = dist.CloudLinux("9")
 
     _pre_reboot_delay = 45
 
-    _elevate_almalinux_rpm_url: str = "https://repo.almalinux.org/elevate/elevate-release-latest-el8.noarch.rpm"
+    _elevate_cloudlinux_rpm_url: str = "https://repo.cloudlinux.com/elevate/elevate-release-latest-el8.noarch.rpm"
+    _elevate_cloudlinux_repo_id: str = "cloudlinux-elevate"
     _leapp_vendors_postgres_repo: str = '/etc/leapp/files/vendors.d/postgresql.repo'
     _sha1_only_packages: typing.List[str] = [
         "libc-client",
@@ -65,17 +81,17 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
 
     @property
     def upgrader_name(self) -> str:
-        return "Plesk::AlmaLinux8to9Upgrader"
+        return "Plesk::CloudLinux8to9Upgrader"
 
     @property
     def upgrader_version(self) -> str:
-        if almalinux8to9.config.version:
-            return almalinux8to9.config.version + "-" + almalinux8to9.config.revision[:8]
-        return almalinux8to9.config.revision
+        if cloudlinux8to9.config.version:
+            return cloudlinux8to9.config.version + "-" + cloudlinux8to9.config.revision[:8]
+        return cloudlinux8to9.config.revision
 
     @property
     def issues_url(self) -> str:
-        return "https://github.com/plesk/almalinux8to9/issues"
+        return "https://github.com/plesk/cloudlinux8to9/issues"
 
     def prepare_feedback(
         self,
@@ -133,15 +149,16 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             "Leapp installation": [
                 common_actions.RemoveLeappReposDisablement(),
                 common_actions.LeappInstallation(
-                    self._elevate_almalinux_rpm_url,
+                    self._elevate_cloudlinux_rpm_url,
                     [
-                        "leapp-0.20.0-1.el8_10",
-                        "leapp-data-almalinux-0.10-9.el8.20250729",
-                        "leapp-deps-0.20.0-1.el8_10",
-                        "leapp-upgrade-el8toel9-0.23.0-1.el8.elevate.1.1",
-                        "leapp-upgrade-el8toel9-deps-0.23.0-1.el8.elevate.1.1",
-                        "python3-leapp-0.20.0-1.el8_10",
+                        "leapp-0.18.0-2.el8",
+                        "leapp-data-cloudlinux-0.3-9.el8.20240821",
+                        "leapp-deps-0.18.0-2.el8",
+                        "leapp-upgrade-el8toel9-0.20.0-12.el8.cloudlinux",
+                        "leapp-upgrade-el8toel9-deps-0.20.0-12.el8.cloudlinux",
+                        "python3-leapp-0.18.0-2.el8",
                     ],
+                    elevate_repo_id=self._elevate_cloudlinux_repo_id,
                     remove_logs_on_finish=self.remove_leapp_logs
                 ),
             ],
@@ -181,6 +198,7 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
                 common_actions.UninstallExtension("tuxcare-php"),
                 common_actions.PreserveMariadbConfig(),
                 common_actions.SubstituteSshPermitRootLoginConfigured(),
+                custom_actions.SetFirewalldAllowZoneDriftingOff(),
                 custom_actions.UseSystemResolveForLeappContainer(),
             ],
             "Handle plesk related services": [
@@ -189,13 +207,13 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
                 common_actions.HandlePleskFirewallService(),
             ],
             "Handle packages and services": [
-                common_actions.RemovePleskComponents(
+                custom_actions.RemovePleskComponentsWhenInstallerIsIdle(
                     ["webalizer"], options.state_dir, "rm webalizer component",
                 ),
                 custom_actions.FixOsVendorPhpFpmConfiguration(),
                 common_actions.RebundleRubyApplications(),
                 custom_actions.ReinstallPhpmyadminPleskComponents(),
-                custom_actions.ReinstallRoundcubePleskComponents(),
+                custom_actions.ReinstallRoundcubePleskComponentsWhenInstallerIsIdle(),
                 custom_actions.ReinstallConflictPackages(options.state_dir),
                 custom_actions.ReinstallPerlCpanModules(options.state_dir),
                 common_actions.DisableSuspiciousKernelModules(),
@@ -219,13 +237,14 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             "Repositories handling": [
                 custom_actions.SetRPMCryptoPolicy(self._sha1_only_packages, "LEGACY"),
                 custom_actions.AdoptRepositories(),
+                custom_actions.SwitchClnChannel(),
                 custom_actions.PostEnableRepos(["crb"]),
                 custom_actions.DisablePesEventsRemovePackages(["libidn"]),
             ],
             "Do convert": [
                 custom_actions.DisableBaseRepoUpdatesRepository(),
                 custom_actions.RemovePleskBaseRepository(),
-                custom_actions.DoAlmaLinux8to9Convert(),
+                custom_actions.DoCloudLinux8to9Convert(),
             ],
             "Resume": [
                 common_actions.RestoreInProgressSshLoginMessage(new_os),
@@ -261,7 +280,7 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             actions_map = util.merge_dicts_of_lists(actions_map, {
                 "Pause before reboot": [
                     common_actions.PreRebootPause(
-                        REBOOT_WARN_MESSAGE.format(delay=self._pre_reboot_delay, util_name="almalinux8to9"),
+                        REBOOT_WARN_MESSAGE.format(delay=self._pre_reboot_delay, util_name="cloudlinux8to9"),
                         self._pre_reboot_delay
                     ),
                 ]
@@ -282,10 +301,10 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
         phase: Phase
     ) -> typing.List[action.CheckAction]:
         if phase is Phase.FINISH:
-            return [custom_actions.AssertDistroIsAlmaLinux9()]
+            return [custom_actions.AssertDistroIsCloudLinux9()]
 
         FIRST_SUPPORTED_BY_ALMA_8_PHP_VERSION = "5.6"
-        ALMALINUX9_AMAVIS_REQUIRED_RAM = int(1.5 * 1024 * 1024 * 1024)
+        CLOUDLINUX9_AMAVIS_REQUIRED_RAM = int(1.5 * 1024 * 1024 * 1024)
         # From our experience it's better to have at least 5GB as the required minimum space to store packages,
         # however when more space is required we should check exactly what was requested.
         # Leapp_ovl_size in Mbs so we have to multiply
@@ -302,9 +321,14 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             custom_actions.AssertNoMoreThenOneKernelNamedNIC(),
             custom_actions.AssertRedHatKernelInstalled(),
             custom_actions.AssertLastInstalledKernelInUse(),
+            # The stock media repo is a local repository leapp tolerates, so it is
+            # not a reason to inhibit. CloudLinux ships no such file of its own,
+            # but a CloudLinux 8 host draws its base content from AlmaLinux and
+            # can carry AlmaLinux's - so skip either spelling rather than
+            # renaming upstream's exclusion into one that never matches.
             common_actions.AssertLocalRepositoryNotPresent(file_list = [
                     file for file in files.find_files_case_insensitive("/etc/yum.repos.d", "*.repo")
-                    if os.path.basename(file) != "AlmaLinux-Media.repo"
+                    if os.path.basename(file) not in ("CloudLinux-Media.repo", "AlmaLinux-Media.repo")
                  ]),
             common_actions.AssertIPRepositoryNotPresent(),
             custom_actions.CheckNMUnreachableDevices(),
@@ -317,7 +341,7 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             common_actions.AssertPackageIsNotInstalled("plesk-php73",
                                                        "PHP-7.3 is not supported"),
             common_actions.AssertPackageIsNotInstalled("psa-qmail",
-                                                       "QMail is not supported on AlmaLinux 9 - consider switching to Postfix before conversion"),
+                                                       "QMail is not supported on CloudLinux 9 - consider switching to Postfix before conversion"),
             custom_actions.AssertStatsToolNotUsed('webalizer'),
             common_actions.AssertConfigurationConflictsResolved(["/etc/my.cnf"]),
             custom_actions.AssertMariadbRepoAvailable(),
@@ -331,11 +355,11 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             custom_actions.AssertNoOutdatedLetsEncryptExtRepository(),
             custom_actions.AssertPleskRepositoriesNotNoneLink(),
             common_actions.AssertNoAbsoluteLinksInRoot(),
-            # custom_actions.AssertMinGovernorMariadbVersion(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
-            # custom_actions.AssertGovernorMysqlNotInstalled(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
+            custom_actions.AssertMinGovernorMariadbVersion(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
+            custom_actions.AssertGovernorMysqlNotInstalled(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
             custom_actions.CheckSourcePointsToArchiveURL(),
             common_actions.AssertNoMoreThenOneKernelDevelInstalled(),
-            common_actions.AssertEnoughRamForAmavis(ALMALINUX9_AMAVIS_REQUIRED_RAM, self.amavis_upgrade_allowed),
+            common_actions.AssertEnoughRamForAmavis(CLOUDLINUX9_AMAVIS_REQUIRED_RAM, self.amavis_upgrade_allowed),
             common_actions.AssertSshPermitRootLoginConfigured(skip_known_substitudes=True),
             common_actions.AssertFstabOrderingIsFine(),
             common_actions.AssertFstabHasDirectRaidDevices(self.allow_raid_devices),
@@ -345,8 +369,8 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
                 "dnf",
                 name="asserting dnf package available",
                 recommendation="""The dnf package is required for Leapp to function properly.
-\tHint: You can install it using the AlmaLinux-8 BaseOS repository with the following base URL:
-\t\t'baseurl=https://repo.almalinux.org/almalinux/8/BaseOS/x86_64/os/'"""
+\tHint: You can install it using the CloudLinux 8 BaseOS repository with the following base URL:
+\t\t'baseurl=https://repo.cloudlinux.com/cloudlinux/8/BaseOS/x86_64/os/'"""
             ),
         ]
 
@@ -356,12 +380,13 @@ class AlmaLinux8to9Upgrader(DistUpgrader):
             checks.append(custom_actions.AssertOutdatedPostgresNotInstalled())
         else:
             checks.append(custom_actions.AssertPostgresLocaleMatchesSystemOne())
+            checks.append(custom_actions.AssertPostgresDatabaseIsUpgradable())
         if not self.remove_unknown_perl_modules:
             checks.append(custom_actions.AssertThereIsNoUnknownPerlCpanModules())
         if not self.disable_spamassasin_plugins:
             checks.append(common_actions.AssertSpamassassinAdditionalPluginsDisabled())
-        if not self.allow_old_script_version and almalinux8to9.config.version:
-            checks.append(common_actions.AssertScriptVersionUpToDate("https://github.com/plesk/almalinux8to9", "almalinux8to9", version.DistupgradeToolVersion(almalinux8to9.config.version)))
+        if not self.allow_old_script_version and cloudlinux8to9.config.version:
+            checks.append(common_actions.AssertScriptVersionUpToDate("https://github.com/plesk/cloudlinux8to9", "cloudlinux8to9", version.DistupgradeToolVersion(cloudlinux8to9.config.version)))
         if not any(packages.is_package_installed(name) for name in self._sha1_only_packages):
             checks.append(
                 custom_actions.AssertNoOldRPMSignatures(not self.rm_sha1_plesk_packages))
@@ -404,7 +429,7 @@ the log file.
         )
         parser.add_argument(
             "--fix-deprecated-if-scripts", action="store_true", dest="fix_deprecated_if_scripts", default=False,
-            help="Fix deprecated custom network scripts. Custom network scripts in /sbin/if*-local are deprecated and may not work properly on AlmaLinux 9. By enabling this option, the utility will create wrapper scripts that will call the original scripts if they exist and are executable."
+            help="Fix deprecated custom network scripts. Custom network scripts in /sbin/if*-local are deprecated and may not work properly on CloudLinux 9. By enabling this option, the utility will create wrapper scripts that will call the original scripts if they exist and are executable."
         )
         parser.add_argument(
             "--upgrade-postgres", action="store_true", dest="upgrade_postgres_allowed", default=False,
@@ -456,7 +481,7 @@ the log file.
         self.skip_space_checks = options.skip_space_checks
 
 
-class AlmaLinux8to9Factory(DistUpgraderFactory):
+class CloudLinux8to9Factory(DistUpgraderFactory):
     def __init__(self):
         super().__init__()
 
@@ -471,11 +496,11 @@ class AlmaLinux8to9Factory(DistUpgraderFactory):
         from_system: typing.Optional[dist.Distro] = None,
         to_system: typing.Optional[dist.Distro] = None
     ) -> bool:
-        return AlmaLinux8to9Upgrader.supports(from_system, to_system)
+        return CloudLinux8to9Upgrader.supports(from_system, to_system)
 
     @property
     def upgrader_name(self) -> str:
-        return "Plesk::AlmaLinux8to9Upgrader"
+        return "Plesk::CloudLinux8to9Upgrader"
 
     def create_upgrader(self, *args, **kwargs) -> DistUpgrader:
-        return AlmaLinux8to9Upgrader(*args, **kwargs)
+        return CloudLinux8to9Upgrader(*args, **kwargs)

@@ -31,6 +31,47 @@ class AssertOutdatedPostgresNotInstalled(action.CheckAction):
         return not postgres.is_postgres_installed() or not postgres.is_database_initialized() or not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION)
 
 
+# What CloudLinux 9's postgresql-upgrade package carries: it ships only
+# /usr/lib64/pgsql/postgresql-12/bin, so `postgresql-setup --upgrade` can bring
+# a version 12 datadir to 13 and nothing older.
+_POSTGRES_UPGRADE_REACHES_BACK_TO = 12
+
+
+class AssertPostgresDatabaseIsUpgradable(action.CheckAction):
+    """Refuse --upgrade-postgres when it could not actually deliver.
+
+    --upgrade-postgres waives AssertOutdatedPostgresNotInstalled and defers the
+    work to PostgresDatabasesUpdate, which runs `postgresql-setup --upgrade`
+    AFTER the conversion. That reaches exactly one major version back, so a
+    datadir older than 12 converts and only then fails:
+
+        ERROR: Cannot upgrade because the database in /var/lib/pgsql/data is of
+               version 10 but it should be 12
+
+    which is past the point of no return, with PostgreSQL left unusable. And 10
+    is the DEFAULT stream of el8's postgresql module, so it is the common case,
+    not an unlucky one. Say so beforehand, while the administrator can still act.
+    """
+
+    def __init__(self) -> None:
+        self.name = "checking the PostgreSQL database can be upgraded on the target"
+        self.description = f"""The PostgreSQL data directory is too old to be upgraded during the conversion.
+	'postgresql-setup --upgrade' on {_ALMA9_POSTGRES_VERSION} upgrades a version {_POSTGRES_UPGRADE_REACHES_BACK_TO} database and no older one,
+	so --upgrade-postgres cannot do anything for this server and PostgreSQL would be
+	left unusable after the conversion.
+	Upgrade PostgreSQL to version {_POSTGRES_UPGRADE_REACHES_BACK_TO} or later before converting, and back your databases up first.
+"""
+
+    def _do_check(self) -> bool:
+        if not postgres.is_postgres_installed() or not postgres.is_database_initialized():
+            return True
+        if not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION):
+            # Already at or beyond the target version, so nothing will try to
+            # upgrade it.
+            return True
+        return not postgres.is_database_major_version_lower(_POSTGRES_UPGRADE_REACHES_BACK_TO)
+
+
 class AssertPostgresLocaleMatchesSystemOne(action.CheckAction):
     def __init__(self):
         self.name = "checking if system locale is safe for Postgres databases upgrade"
@@ -124,6 +165,25 @@ class PostgresDatabasesUpdate(action.ActiveAction):
         return action.ActionResult()
 
     def _upgrade_database(self) -> None:
+        # _is_required() is evaluated when the action flow is BUILT - on the
+        # source system, where PostgreSQL is still older - and the answer is
+        # stored in actions.json. On a resume the stored plan still says
+        # "required", so without this check the upgrade is attempted again
+        # against a data directory that is already current, and
+        # `postgresql-setup --upgrade` exits non-zero and fails the finish
+        # stage. Seen on a conversion whose upgrade had actually SUCCEEDED.
+        #
+        # The finish stage is resumable by design - it runs from a systemd unit
+        # after a reboot, and the tool tells the administrator to re-run it
+        # after fixing anything - so an action that cannot be re-run turns a
+        # recoverable interruption into a manual one.
+        if not postgres.is_database_major_version_lower(_ALMA9_POSTGRES_VERSION):
+            log.info(
+                "PostgreSQL data directory is already at version "
+                f"{_ALMA9_POSTGRES_VERSION} or later; nothing to upgrade."
+            )
+            return
+
         util.logged_check_call(['dnf', 'install', '-y', 'postgresql-upgrade'])
 
         util.logged_check_call(['postgresql-setup', '--upgrade'])
@@ -161,7 +221,7 @@ class AssertModernPostgresRepositoryFilePresent(action.CheckAction):
     def __init__(self):
         self.name = "checking the modern postgresql repository file is present"
         self.description = f"""A modern PostgreSQL is installed, but its repository file {_POSTGRES_REPO_FILE!r} is missing.
-\tWithout it the conversion cannot reinstall PostgreSQL on AlmaLinux 9 and the packages would be removed silently.
+\tWithout it the conversion cannot reinstall PostgreSQL on CloudLinux 9 and the packages would be removed silently.
 \tPlease either place the PostgreSQL repository file at {_POSTGRES_REPO_FILE}, or remove PostgreSQL before the conversion.
 """
 
@@ -201,7 +261,7 @@ class PostgresReinstallModernPackage(action.ActiveAction):
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                skip_disabled=True,
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         for major_version in self._get_versions():

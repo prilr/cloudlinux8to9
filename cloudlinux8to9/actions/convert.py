@@ -22,7 +22,7 @@ class LeappPreupgradeRisksPreventedException(Exception):
         return f"{super().__str__()}\n{original_exception_str}The preventing factors are:\n{inhibitors_str}"
 
 
-class DoAlmaLinux8to9Convert(action.ActiveAction):
+class DoCloudLinux8to9Convert(action.ActiveAction):
     LEAPP_RESUME_SERVICE = "leapp_resume.service"
     leapp_ovl_size: int
 
@@ -43,7 +43,16 @@ class DoAlmaLinux8to9Convert(action.ActiveAction):
             else:
                 raise e
 
-        util.log_outputs_check_call(["/usr/bin/leapp", "upgrade"], collect_return_stdout=False, env=env_vars)
+        # --nowarn: the CloudLinux leapp gates `upgrade` behind an interactive
+        # "have you taken a backup? Y/N>" confirmation
+        # (`if not args.resume and not args.nowarn` in
+        # leapp/cli/commands/upgrade/__init__.py). We run leapp with no
+        # terminal, so the prompt reads EOF and the upgrade dies right after
+        # preupgrade has passed and the target userspace has been built. The
+        # question has already been put to the user by this tool - its own
+        # README opens by telling them to back their databases up - and this is
+        # long past the point where it could be asked again.
+        util.log_outputs_check_call(["/usr/bin/leapp", "upgrade", "--nowarn"], collect_return_stdout=False, env=env_vars)
         return action.ActionResult()
 
     def _post_action(self) -> action.ActionResult:

@@ -70,6 +70,7 @@ def _do_url_replacement(url: typing.Optional[str]) -> typing.Optional[str]:
         lambda to_change: to_change.replace("rpm-CentOS-8", "rpm-RedHat-el9"),
         lambda to_change: to_change.replace("rpm-CentOS-8", "rpm-RedHat-el9"),
         lambda to_change: to_change.replace("AlmaLinux-8", "AlmaLinux-9"),
+        lambda to_change: to_change.replace("CloudLinux-8", "CloudLinux-9"),
         lambda to_change: to_change.replace("cloudlinux/8", "cloudlinux/9"),
         lambda to_change: to_change.replace("almalinux/8", "almalinux/9"),
         lambda to_change: to_change.replace("epel-8", "epel-9"),
@@ -83,9 +84,14 @@ def _do_url_replacement(url: typing.Optional[str]) -> typing.Optional[str]:
         lambda to_change: to_change.replace("rhel8", "rhel9"),
         lambda to_change: to_change.replace("CentOS_8", "CentOS_9"),
         lambda to_change: to_change.replace("AlmaLinux_8", "AlmaLinux_9"),
+        lambda to_change: to_change.replace("CloudLinux_8", "CloudLinux_9"),
         lambda to_change: to_change.replace("rhel-$releasever", "rhel-9"),
         lambda to_change: to_change.replace("$releasever", "9"),
-        lambda to_change: to_change.replace("mirror.pp.plesk.tech/cloudlinux/8/os/", "mirror.pp.plesk.tech/cloudlinux/9/cloudlinux-x86_64-server-9/"),
+        # Matches the post-substitution spelling on purpose: the generic
+        # "cloudlinux/8" -> "cloudlinux/9" rule above has already run by the time
+        # this one does, so a rule written against the source version can never
+        # fire and the URL is left pointing at a path the mirror does not serve.
+        lambda to_change: to_change.replace("mirror.pp.plesk.tech/cloudlinux/9/os/", "mirror.pp.plesk.tech/cloudlinux/9/cloudlinux-x86_64-server-9/"),
         lambda to_change: to_change.replace("mirror.pp.plesk.tech/almalinux/8/os/", "mirror.pp.plesk.tech/almalinux/9/almalinux-x86_64-server-9/"),
         lambda to_change: to_change.replace("autoinstall.plesk.com/PMM_0.1.10", "autoinstall.plesk.com/PMM_0.1.11"),
         lambda to_change: to_change.replace("autoinstall.plesk.com/PMM0", "autoinstall.plesk.com/PMM_0.1.11"),

@@ -8,8 +8,9 @@ from functools import partial
 from pleskdistup.common import action, files, leapp_configs, log, motd, packages, plesk, rpm, systemd, util
 from .common import get_adapted_repository
 from .common_checks import AssertNoOldRPMSignatures
+from .plesk import WaitsForIdleInstaller
 
-BASE_REPO_PATHS = ["/etc/yum.repos.d/base.repo", "/etc/yum.repos.d/almalinux-base.repo"]
+BASE_REPO_PATHS = ["/etc/yum.repos.d/base.repo", "/etc/yum.repos.d/cloudlinux-base.repo"]
 
 
 class PostEnableRepos(action.ActiveAction):
@@ -176,13 +177,44 @@ class ReinstallRoundcubePleskComponents(action.ActiveAction):
         return 3 * 60
 
 
+class ReinstallRoundcubePleskComponentsWhenInstallerIsIdle(
+    WaitsForIdleInstaller, ReinstallRoundcubePleskComponents
+):
+    """The roundcube reinstall, made to survive a lingering installer lock.
+
+    is_required() shells out to the installer, and the flow builder evaluates it
+    for every action BEFORE any action runs - so there is no earlier action that
+    could have waited on our behalf. A lock still held from the preceding phase
+    therefore kills the conversion during construction:
+
+        Failed: re-installing roundcube plesk components. The reason:
+        Plesk installer is busy: ... BUSY state: exit status 1
+
+    The component listing the wait already fetched answers is_required(), so the
+    installer is asked once rather than twice with a fresh race in between.
+    """
+
+    def is_required(self) -> bool:
+        components = self._wait_until_installer_is_idle()
+        component = components.get("roundcube")
+        return component is not None and component.is_installed
+
+    def _post_action(self) -> action.ActionResult:
+        self._wait_until_installer_is_idle()
+        return super()._post_action()
+
+    def _revert_action(self) -> action.ActionResult:
+        self._wait_until_installer_is_idle()
+        return super()._revert_action()
+
+
 class ReinstallConflictPackages(action.ActiveAction):
     removed_packages_file: str
     conflict_pkgs_map: typing.Dict[str, str]
 
     def __init__(self, temp_directory: str):
         self.name = "re-installing common conflict packages"
-        self.removed_packages_file = temp_directory + "/almalinux8to9_removed_packages.txt"
+        self.removed_packages_file = temp_directory + "/cloudlinux8to9_removed_packages.txt"
         self.conflict_pkgs_map = {
             "python36-argcomplete": "python3-argcomplete",
             "python36-cffi": "python3-cffi",
@@ -317,12 +349,37 @@ class AdoptRepositories(action.ActiveAction):
                 leapp_configs.adopt_repositories(path,
                                                 do_adapt_repository=partial(get_adapted_repository, keep_id=False))
 
+    POST_UPDATE_FAILED_MSG = """The post-conversion 'dnf update' did not finish. The system has been
+converted, but at least one repository could not be used - most often one that
+was pinned to the old release and has no counterpart under the new one.
+Check 'dnf repolist' and /var/log/plesk/cloudlinux8to9.log, fix or remove the
+repository, and run 'dnf update' by hand.
+"""
+
     def _post_action(self) -> action.ActionResult:
         self._use_rpmnew_repositories()
         self._adopt_plesk_repositories()
         self._adopt_base_repository()
-        util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
-        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=elevate"])
+        try:
+            util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
+            util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
+        except Exception as e:
+            # dnf fails the whole command when ANY enabled repository cannot be
+            # reached, and a Plesk server carries plenty of third-party
+            # repositories this conversion does not know how to remap - so one
+            # of them 404ing once the release version changes is an ordinary
+            # outcome, not an exceptional one. Seen on a real conversion, where
+            # a leftover repository pinned to the old release asked for
+            # .../9.8/cloudlinux-x86_64-server-8/ and got a 404.
+            #
+            # Letting that abort the finish stage strands the host: the actions
+            # that restore Plesk have not run yet, and this side of the reboot
+            # cannot be reverted. The framework's own contract for _post_action
+            # is that failures here are best-effort recovery - log clearly and
+            # keep going - so report it loudly and carry on rather than leaving
+            # the server without its control panel.
+            log.err(f"Post-conversion 'dnf update' failed: {e}")
+            motd.add_finish_ssh_login_message(self.POST_UPDATE_FAILED_MSG)
         return action.ActionResult()
 
     def _revert_action(self) -> action.ActionResult:
@@ -330,6 +387,47 @@ class AdoptRepositories(action.ActiveAction):
 
     def estimate_post_time(self) -> int:
         return 2 * 60
+
+
+class SwitchClnChannel(action.ActiveAction):
+    CLN_SWITCH_CHANNEL_BIN = "/usr/sbin/cln-switch-channel"
+
+    def __init__(self) -> None:
+        self.name = "switching CLN channel"
+
+    def _is_required(self) -> bool:
+        # Carried over from cloudlinux7to8, where every CloudLinux 7 host was
+        # CLN managed. CloudLinux 8 also ships the SWNG mirrorlist scheme, and
+        # such a host has no cln-switch-channel: rhn-client-tools is installed
+        # and the binary is simply not in it. Since all the work here is in the
+        # revert, an unguarded version fails only while the user is already
+        # recovering from something else.
+        return os.path.exists(self.CLN_SWITCH_CHANNEL_BIN)
+
+    def _prepare_action(self) -> action.ActionResult:
+        return action.ActionResult()
+
+    def _post_action(self) -> action.ActionResult:
+        # Switch from 8 to 9 is done internally by leapp
+        return action.ActionResult()
+
+    def _revert_action(self) -> action.ActionResult:
+        # Guarded here as well as in _is_required: the revert flow runs any
+        # action its stored state marks as succeeded, whatever is_required now
+        # says, and _prepare_action succeeds trivially. So state written by a
+        # build without the guard - or a host that lost the CLN tooling between
+        # prepare and revert, which a conversion can well do - would still get
+        # here.
+        if not os.path.exists(self.CLN_SWITCH_CHANNEL_BIN):
+            log.info(f"{self.CLN_SWITCH_CHANNEL_BIN!r} is not present, there is no CLN channel to move back")
+            return action.ActionResult()
+        util.logged_check_call([self.CLN_SWITCH_CHANNEL_BIN, "-t", "8", "-o", "-f"])
+        # Probably not really needed, but that's the way forward leapp logic is set up
+        util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
+        return action.ActionResult()
+
+    def estimate_revert_time(self) -> int:
+        return 2
 
 
 class RemovePleskBaseRepository(action.ActiveAction):
@@ -348,7 +446,7 @@ class RemovePleskBaseRepository(action.ActiveAction):
 
     def _is_plesk_base(self, repo_file: str) -> bool:
         for repo in rpm.extract_repodata(repo_file):
-            if repo.url and "psabr.aws.plesk.tech/share/mirror/almalinux/8" in repo.url:
+            if repo.url and "psabr.aws.plesk.tech/share/mirror/cloudlinux/8" in repo.url:
                 log.info(f"Plesk base repo found in {repo_file!r} by repository {repo.id!r}")
                 return True
         return False
@@ -453,7 +551,7 @@ class AdoptAtomicRepositories(action.ActiveAction):
         leapp_configs.add_repositories_mapping_json([self.atomic_repository_path],
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         return action.ActionResult()
@@ -501,7 +599,7 @@ class HandleInternetxRepository(action.ActiveAction):
             leapp_configs.add_repositories_mapping_json([file],
                                                    do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                    mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                                   distro="almalinux",
+                                                   distro="cloudlinux",
                                                    source_major_version="8",
                                                    target_major_version="9")
         return action.ActionResult()
@@ -532,7 +630,7 @@ class DisableBaseRepoUpdatesRepository(action.ActiveAction):
         for path in self.base_repo_paths:
             if os.path.exists(path):
                 rpm.remove_repositories(path, [
-                    lambda repo: repo.url is not None and "mirror.pp.plesk.tech/almalinux/8/updates" in repo.url,
+                    lambda repo: repo.url is not None and "mirror.pp.plesk.tech/cloudlinux/8/updates" in repo.url,
                 ])
         return action.ActionResult()
 

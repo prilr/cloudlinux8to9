@@ -24,7 +24,7 @@ class FixupImunify(action.ActiveAction):
         leapp_configs.add_repositories_mapping_json(repofiles,
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
 
@@ -62,7 +62,7 @@ class AdoptKolabRepositories(action.ActiveAction):
             ],
             do_adapt_repository=partial(get_adapted_repository, keep_id=False),
             mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-            distro="almalinux",
+            distro="cloudlinux",
             source_major_version="8",
             target_major_version="9",
         )

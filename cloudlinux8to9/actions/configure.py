@@ -5,7 +5,7 @@ import shutil
 import typing
 from functools import partial
 
-from pleskdistup.common import action, leapp_configs, files, rpm, util
+from pleskdistup.common import action, leapp_configs, files, log, rpm, util
 from .common import get_adapted_repository
 
 
@@ -56,8 +56,23 @@ class PleskMainRepoTemporary(action.ActiveAction):
                     continue
 
                 for repo in rpm.extract_repodata(file):
-                    if repo.enabled == "0":
-                        continue
+                    # Deliberately NOT skipping repositories with enabled=0.
+                    #
+                    # This action's whole job is to find where Plesk's panel
+                    # packages live, and the extras repository names that URL
+                    # whether or not it is enabled for everyday yum use.
+                    # CloudLinux + Plesk images ship it disabled; AlmaLinux ones
+                    # ship it enabled, which is the single difference that made
+                    # this work there and not here.
+                    #
+                    # Skipping it is not a harmless no-op: adopt_repositories
+                    # maps the disabled extras repo into leapp's target set
+                    # anyway, so leapp can satisfy the ~113 extras/PHP packages
+                    # on el9 but not the ~21 panel ones - and it ERASES those.
+                    # The erase runs Plesk's uninstall scriptlets, which call
+                    # systemctl, which cannot work in the upgrade initramfs, so
+                    # the whole transaction fails and the host ends up on
+                    # CloudLinux 9 with Plesk half-migrated.
                     if repo.id is None or repo.name is None or repo.url is None \
                             or not repo.id.startswith("PLESK_18_0") \
                             or "extras" not in repo.id:
@@ -78,10 +93,21 @@ class PleskMainRepoTemporary(action.ActiveAction):
 
     def _prepare_action(self) -> action.ActionResult:
         repofiles = files.find_files_case_insensitive("/etc/yum.repos.d", ["plesk*.repo"])
-        self._create_temporary_plesk_repo(repofiles, self.repo_filepath)
+        derived = self._create_temporary_plesk_repo(repofiles, self.repo_filepath)
+        if not derived:
+            # Say so. Reporting success having written nothing but a header
+            # comment is how this went unnoticed: the action logged "Success",
+            # and the consequence only surfaced an hour later inside the leapp
+            # transaction, as scriptlet errors on packages being erased.
+            log.warn(
+                "No Plesk main repository could be derived from {}. Plesk's "
+                "panel packages will have no counterpart on the target system, "
+                "and leapp will remove them instead of upgrading them."
+                .format(", ".join(repofiles) or "any plesk*.repo file")
+            )
         # We need this update since plesk installer will not upgrade "same-version" packages
         # so these packages might be stuck at old DSA/SHA1 signed
-        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=elevate"])
+        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
         return action.ActionResult()
 
     def _post_action(self) -> action.ActionResult:
@@ -110,7 +136,7 @@ class LeappReposConfiguration(action.ActiveAction):
             "PLESK_17_PHP52", "PLESK_17_PHP53", "PLESK_17_PHP54", "PLESK_17_PHP55"],
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         return action.ActionResult()
