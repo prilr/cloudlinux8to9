@@ -208,3 +208,32 @@ class TestCloudLinuxRepositoryAdaptation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLeappPins(unittest.TestCase):
+    """The two el8toel9 pins have to name one and the same leapp build.
+
+    They sit on adjacent lines and differ by six characters, so bumping one and
+    missing the other is the natural typo. yum would then be asked for
+    leapp-upgrade-el8toel9 at one version and its -deps subpackage at another;
+    the two are built from a single source RPM and require each other by exact
+    version, so the transaction fails at the very start of the conversion.
+    """
+
+    def _pins(self):
+        upgrader = cloudlinux8to9.upgrader.CloudLinux8to9Upgrader()
+        actions = upgrader.construct_actions(
+            "/root/cloudlinux8to9", mock.MagicMock(), mock.MagicMock())
+        for group in actions.values():
+            for act in group:
+                pkgs = getattr(act, "pkgs_to_install", None)
+                if pkgs and any("leapp" in p for p in pkgs):
+                    return pkgs
+        self.fail("no leapp package pins found in the constructed actions")
+
+    def test_el8toel9_and_its_deps_are_pinned_to_the_same_version(self):
+        pins = self._pins()
+        versions = {p.split("el8toel9-", 1)[1].lstrip("deps-")
+                    for p in pins if "el8toel9" in p}
+        self.assertEqual(len(versions), 1,
+                         "el8toel9 pins disagree: {}".format(sorted(versions)))
