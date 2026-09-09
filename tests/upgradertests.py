@@ -107,6 +107,25 @@ class TestCloudLinuxRepositoryAdaptation(unittest.TestCase):
         self.assertEqual(
             adapted.url, "https://repo.cloudlinux.com/cloudlinux/9/BaseOS/x86_64/os/")
 
+    def test_plesk_extras_repo_moves_to_the_cloudlinux_9_pool(self):
+        # The real shape on a CloudLinux 8 + Plesk 18.0.80 host. Plesk publishes
+        # extras-rpm-CloudLinux-9-x86_64 alongside the 8 one, so getting this
+        # wrong points the target at el8 Plesk packages rather than failing loudly.
+        adapted = self._adapt(
+            "PLESK_18_0_80-extras", "PLESK_18_0_80 extras",
+            "http://autoinstall.plesk.com/pool/PSA_18.0.80_19608/extras-rpm-CloudLinux-8-x86_64/")
+        self.assertEqual(
+            adapted.url,
+            "http://autoinstall.plesk.com/pool/PSA_18.0.80_19608/extras-rpm-CloudLinux-9-x86_64/")
+
+    def test_plesk_php_repo_moves_to_el9(self):
+        adapted = self._adapt(
+            "PLESK_17_PHP84", "PHP 8.4",
+            "http://autoinstall.plesk.com/PHP84_17/dist-rpm-RedHat-el8-x86_64/")
+        self.assertEqual(
+            adapted.url,
+            "http://autoinstall.plesk.com/PHP84_17/dist-rpm-RedHat-el9-x86_64/")
+
     def test_cloudlinux_dashed_spelling_is_bumped(self):
         adapted = self._adapt(
             "cl-extras", "CloudLinux extras",
