@@ -333,8 +333,19 @@ class AdoptRepositories(action.ActiveAction):
 
 
 class SwitchClnChannel(action.ActiveAction):
+    CLN_SWITCH_CHANNEL_BIN = "/usr/sbin/cln-switch-channel"
+
     def __init__(self) -> None:
         self.name = "switching CLN channel"
+
+    def _is_required(self) -> bool:
+        # Carried over from cloudlinux7to8, where every CloudLinux 7 host was
+        # CLN managed. CloudLinux 8 also ships the SWNG mirrorlist scheme, and
+        # such a host has no cln-switch-channel: rhn-client-tools is installed
+        # and the binary is simply not in it. Since all the work here is in the
+        # revert, an unguarded version fails only while the user is already
+        # recovering from something else.
+        return os.path.exists(self.CLN_SWITCH_CHANNEL_BIN)
 
     def _prepare_action(self) -> action.ActionResult:
         return action.ActionResult()
@@ -344,7 +355,7 @@ class SwitchClnChannel(action.ActiveAction):
         return action.ActionResult()
 
     def _revert_action(self) -> action.ActionResult:
-        util.logged_check_call(["/usr/sbin/cln-switch-channel", "-t", "8", "-o", "-f"])
+        util.logged_check_call([self.CLN_SWITCH_CHANNEL_BIN, "-t", "8", "-o", "-f"])
         # Probably not really needed, but that's the way forward leapp logic is set up
         util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
         return action.ActionResult()
