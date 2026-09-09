@@ -14,13 +14,21 @@ import cloudlinux8to9.config
 from cloudlinux8to9 import actions as custom_actions
 
 
+# The dist-upgrader framework does not know CloudLinux 9 yet, so get_distro()
+# would return UnknownDistro on the converted system and pleskdistup.main would
+# refuse to run the finish stage. Register it here, at import time of the
+# upgrader, i.e. before anything can call (and lru_cache) get_distro().
+dist.register_distro("CloudLinux", "9", dist.CloudLinux("9"))
+
+
 class CloudLinux8to9Upgrader(DistUpgrader):
-    _distro_from = dist.AlmaLinux("8")
-    _distro_to = dist.AlmaLinux("9")
+    _distro_from = dist.CloudLinux("8")
+    _distro_to = dist.CloudLinux("9")
 
     _pre_reboot_delay = 45
 
-    _elevate_almalinux_rpm_url: str = "https://repo.almalinux.org/elevate/elevate-release-latest-el8.noarch.rpm"
+    _elevate_cloudlinux_rpm_url: str = "https://repo.cloudlinux.com/elevate/elevate-release-latest-el8.noarch.rpm"
+    _elevate_cloudlinux_repo_id: str = "cloudlinux-elevate"
     _leapp_vendors_postgres_repo: str = '/etc/leapp/files/vendors.d/postgresql.repo'
     _sha1_only_packages: typing.List[str] = [
         "libc-client",
@@ -133,15 +141,16 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             "Leapp installation": [
                 common_actions.RemoveLeappReposDisablement(),
                 common_actions.LeappInstallation(
-                    self._elevate_almalinux_rpm_url,
+                    self._elevate_cloudlinux_rpm_url,
                     [
-                        "leapp-0.20.0-1.el8_10",
-                        "leapp-data-almalinux-0.10-9.el8.20250729",
-                        "leapp-deps-0.20.0-1.el8_10",
-                        "leapp-upgrade-el8toel9-0.23.0-1.el8.elevate.1.1",
-                        "leapp-upgrade-el8toel9-deps-0.23.0-1.el8.elevate.1.1",
-                        "python3-leapp-0.20.0-1.el8_10",
+                        "leapp-0.18.0-2.el8",
+                        "leapp-data-cloudlinux-0.3-9.el8.20240821",
+                        "leapp-deps-0.18.0-2.el8",
+                        "leapp-upgrade-el8toel9-0.20.0-10.el8.cloudlinux",
+                        "leapp-upgrade-el8toel9-deps-0.20.0-10.el8.cloudlinux",
+                        "python3-leapp-0.18.0-2.el8",
                     ],
+                    elevate_repo_id=self._elevate_cloudlinux_repo_id,
                     remove_logs_on_finish=self.remove_leapp_logs
                 ),
             ],
@@ -219,6 +228,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             "Repositories handling": [
                 custom_actions.SetRPMCryptoPolicy(self._sha1_only_packages, "LEGACY"),
                 custom_actions.AdoptRepositories(),
+                custom_actions.SwitchClnChannel(),
                 custom_actions.PostEnableRepos(["crb"]),
                 custom_actions.DisablePesEventsRemovePackages(["libidn"]),
             ],
@@ -282,10 +292,10 @@ class CloudLinux8to9Upgrader(DistUpgrader):
         phase: Phase
     ) -> typing.List[action.CheckAction]:
         if phase is Phase.FINISH:
-            return [custom_actions.AssertDistroIsAlmaLinux9()]
+            return [custom_actions.AssertDistroIsCloudLinux9()]
 
         FIRST_SUPPORTED_BY_ALMA_8_PHP_VERSION = "5.6"
-        ALMALINUX9_AMAVIS_REQUIRED_RAM = int(1.5 * 1024 * 1024 * 1024)
+        CLOUDLINUX9_AMAVIS_REQUIRED_RAM = int(1.5 * 1024 * 1024 * 1024)
         # From our experience it's better to have at least 5GB as the required minimum space to store packages,
         # however when more space is required we should check exactly what was requested.
         # Leapp_ovl_size in Mbs so we have to multiply
@@ -304,7 +314,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             custom_actions.AssertLastInstalledKernelInUse(),
             common_actions.AssertLocalRepositoryNotPresent(file_list = [
                     file for file in files.find_files_case_insensitive("/etc/yum.repos.d", "*.repo")
-                    if os.path.basename(file) != "AlmaLinux-Media.repo"
+                    if os.path.basename(file) != "CloudLinux-Media.repo"
                  ]),
             common_actions.AssertIPRepositoryNotPresent(),
             custom_actions.CheckNMUnreachableDevices(),
@@ -317,7 +327,7 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             common_actions.AssertPackageIsNotInstalled("plesk-php73",
                                                        "PHP-7.3 is not supported"),
             common_actions.AssertPackageIsNotInstalled("psa-qmail",
-                                                       "QMail is not supported on AlmaLinux 9 - consider switching to Postfix before conversion"),
+                                                       "QMail is not supported on CloudLinux 9 - consider switching to Postfix before conversion"),
             custom_actions.AssertStatsToolNotUsed('webalizer'),
             common_actions.AssertConfigurationConflictsResolved(["/etc/my.cnf"]),
             custom_actions.AssertMariadbRepoAvailable(),
@@ -331,11 +341,11 @@ class CloudLinux8to9Upgrader(DistUpgrader):
             custom_actions.AssertNoOutdatedLetsEncryptExtRepository(),
             custom_actions.AssertPleskRepositoriesNotNoneLink(),
             common_actions.AssertNoAbsoluteLinksInRoot(),
-            # custom_actions.AssertMinGovernorMariadbVersion(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
-            # custom_actions.AssertGovernorMysqlNotInstalled(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
+            custom_actions.AssertMinGovernorMariadbVersion(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
+            custom_actions.AssertGovernorMysqlNotInstalled(custom_actions.FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION),
             custom_actions.CheckSourcePointsToArchiveURL(),
             common_actions.AssertNoMoreThenOneKernelDevelInstalled(),
-            common_actions.AssertEnoughRamForAmavis(ALMALINUX9_AMAVIS_REQUIRED_RAM, self.amavis_upgrade_allowed),
+            common_actions.AssertEnoughRamForAmavis(CLOUDLINUX9_AMAVIS_REQUIRED_RAM, self.amavis_upgrade_allowed),
             common_actions.AssertSshPermitRootLoginConfigured(skip_known_substitudes=True),
             common_actions.AssertFstabOrderingIsFine(),
             common_actions.AssertFstabHasDirectRaidDevices(self.allow_raid_devices),
@@ -345,8 +355,8 @@ class CloudLinux8to9Upgrader(DistUpgrader):
                 "dnf",
                 name="asserting dnf package available",
                 recommendation="""The dnf package is required for Leapp to function properly.
-\tHint: You can install it using the AlmaLinux-8 BaseOS repository with the following base URL:
-\t\t'baseurl=https://repo.almalinux.org/almalinux/8/BaseOS/x86_64/os/'"""
+\tHint: You can install it using the CloudLinux 8 BaseOS repository with the following base URL:
+\t\t'baseurl=https://repo.cloudlinux.com/cloudlinux/8/BaseOS/x86_64/os/'"""
             ),
         ]
 
@@ -404,7 +414,7 @@ the log file.
         )
         parser.add_argument(
             "--fix-deprecated-if-scripts", action="store_true", dest="fix_deprecated_if_scripts", default=False,
-            help="Fix deprecated custom network scripts. Custom network scripts in /sbin/if*-local are deprecated and may not work properly on AlmaLinux 9. By enabling this option, the utility will create wrapper scripts that will call the original scripts if they exist and are executable."
+            help="Fix deprecated custom network scripts. Custom network scripts in /sbin/if*-local are deprecated and may not work properly on CloudLinux 9. By enabling this option, the utility will create wrapper scripts that will call the original scripts if they exist and are executable."
         )
         parser.add_argument(
             "--upgrade-postgres", action="store_true", dest="upgrade_postgres_allowed", default=False,

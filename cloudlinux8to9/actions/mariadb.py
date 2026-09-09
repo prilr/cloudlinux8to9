@@ -37,7 +37,7 @@ def _is_governor_mariadb_installed() -> bool:
     repofiles = _find_mariadb_repo_files()
     for repofile in repofiles:
         for repo in rpm.extract_repodata(repofile):
-            if repo.url and "repo.almalinux.com" in repo.url and ("cl-mariadb" in repo.url or "cl-mysql" in repo.url):
+            if repo.url and "repo.cloudlinux.com" in repo.url and ("cl-mariadb" in repo.url or "cl-mysql" in repo.url):
                 return True
 
     return False
@@ -102,7 +102,7 @@ class UpdateModernMariadb(RemoveReplacePackages):
             leapp_configs.create_leapp_vendor_repository_adoption(
                 repofile,
                 do_adapt_repository=partial(get_adapted_repository, keep_id=False),
-                distro="almalinux", source_major_version="8", target_major_version="9",
+                distro="cloudlinux", source_major_version="8", target_major_version="9",
             )
 
         return super()._prepare_action()
@@ -124,6 +124,48 @@ class UpdateModernMariadb(RemoveReplacePackages):
 
     def estimate_post_time(self) -> int:
         return 60
+
+
+# Inherited from cloudlinux7to8, where 10.2 was the oldest Governor MariaDB with
+# a cl-MariaDB module on the target. The CloudLinux 9 Governor stream coverage
+# (leapp's MODULE_STREAMS spans mariadb55..mariadb1104) has not been narrowed
+# down yet, so this stays the 7->8 floor until a conversion proves otherwise.
+FIRST_SUPPORTED_GOVERNOR_MARIADB_VERSION = mariadb.MariaDBVersion("10.2.44")
+
+
+class AssertMinGovernorMariadbVersion(action.CheckAction):
+    minimal_version: mariadb.MariaDBVersion
+
+    def __init__(self, version: mariadb.MariaDBVersion) -> None:
+        self.name = "check minimum governor mariadb version"
+        self.minimal_version = version
+        self.description = f"""The installed version of MariaDB is incompatible with the conversion process. To proceed, update MariaDB using Governor to version {str(self.minimal_version)!r} or later.
+\tBefore running the commands below, make sure to back up your databases:
+\t- `/usr/share/lve/dbgovernor/mysqlgovernor.py --mysql-version=mariadb{self.minimal_version.major}{self.minimal_version.minor}`
+\t- `/usr/share/lve/dbgovernor/mysqlgovernor.py --install`
+"""
+
+    def _do_check(self) -> bool:
+        if not mariadb.is_mariadb_installed() or not _is_governor_mariadb_installed():
+            return True
+
+        return mariadb.get_installed_mariadb_version() >= self.minimal_version
+
+
+class AssertGovernorMysqlNotInstalled(action.CheckAction):
+    minimal_version: mariadb.MariaDBVersion
+
+    def __init__(self, version: mariadb.MariaDBVersion) -> None:
+        self.name = "check governor mysql is not installed"
+        self.minimal_version = version
+        self.description = f"""MySQL installed by Governor is not compatible with the conversion process. To continue, use Governor to update MariaDB to at least version {str(self.minimal_version)!r}.
+\tBefore running the commands below, make sure to back up your databases:
+\t- `/usr/share/lve/dbgovernor/mysqlgovernor.py --mysql-version=mariadb{self.minimal_version.major}{self.minimal_version.minor}`
+\t- `/usr/share/lve/dbgovernor/mysqlgovernor.py --install`
+"""
+
+    def _do_check(self) -> bool:
+        return not mariadb.is_mysql_installed() or not _is_governor_mariadb_installed()
 
 
 class AddMysqlConnector(action.ActiveAction):

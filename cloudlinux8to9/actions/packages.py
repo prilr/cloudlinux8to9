@@ -9,7 +9,7 @@ from pleskdistup.common import action, files, leapp_configs, log, motd, packages
 from .common import get_adapted_repository
 from .common_checks import AssertNoOldRPMSignatures
 
-BASE_REPO_PATHS = ["/etc/yum.repos.d/base.repo", "/etc/yum.repos.d/almalinux-base.repo"]
+BASE_REPO_PATHS = ["/etc/yum.repos.d/base.repo", "/etc/yum.repos.d/cloudlinux-base.repo"]
 
 
 class PostEnableRepos(action.ActiveAction):
@@ -322,7 +322,7 @@ class AdoptRepositories(action.ActiveAction):
         self._adopt_plesk_repositories()
         self._adopt_base_repository()
         util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
-        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=elevate"])
+        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
         return action.ActionResult()
 
     def _revert_action(self) -> action.ActionResult:
@@ -330,6 +330,27 @@ class AdoptRepositories(action.ActiveAction):
 
     def estimate_post_time(self) -> int:
         return 2 * 60
+
+
+class SwitchClnChannel(action.ActiveAction):
+    def __init__(self) -> None:
+        self.name = "switching CLN channel"
+
+    def _prepare_action(self) -> action.ActionResult:
+        return action.ActionResult()
+
+    def _post_action(self) -> action.ActionResult:
+        # Switch from 8 to 9 is done internally by leapp
+        return action.ActionResult()
+
+    def _revert_action(self) -> action.ActionResult:
+        util.logged_check_call(["/usr/sbin/cln-switch-channel", "-t", "8", "-o", "-f"])
+        # Probably not really needed, but that's the way forward leapp logic is set up
+        util.logged_check_call(["/usr/bin/dnf", "clean", "all"])
+        return action.ActionResult()
+
+    def estimate_revert_time(self) -> int:
+        return 2
 
 
 class RemovePleskBaseRepository(action.ActiveAction):
@@ -348,7 +369,7 @@ class RemovePleskBaseRepository(action.ActiveAction):
 
     def _is_plesk_base(self, repo_file: str) -> bool:
         for repo in rpm.extract_repodata(repo_file):
-            if repo.url and "psabr.aws.plesk.tech/share/mirror/almalinux/8" in repo.url:
+            if repo.url and "psabr.aws.plesk.tech/share/mirror/cloudlinux/8" in repo.url:
                 log.info(f"Plesk base repo found in {repo_file!r} by repository {repo.id!r}")
                 return True
         return False
@@ -453,7 +474,7 @@ class AdoptAtomicRepositories(action.ActiveAction):
         leapp_configs.add_repositories_mapping_json([self.atomic_repository_path],
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         return action.ActionResult()
@@ -501,7 +522,7 @@ class HandleInternetxRepository(action.ActiveAction):
             leapp_configs.add_repositories_mapping_json([file],
                                                    do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                    mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                                   distro="almalinux",
+                                                   distro="cloudlinux",
                                                    source_major_version="8",
                                                    target_major_version="9")
         return action.ActionResult()
@@ -532,7 +553,7 @@ class DisableBaseRepoUpdatesRepository(action.ActiveAction):
         for path in self.base_repo_paths:
             if os.path.exists(path):
                 rpm.remove_repositories(path, [
-                    lambda repo: repo.url is not None and "mirror.pp.plesk.tech/almalinux/8/updates" in repo.url,
+                    lambda repo: repo.url is not None and "mirror.pp.plesk.tech/cloudlinux/8/updates" in repo.url,
                 ])
         return action.ActionResult()
 

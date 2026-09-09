@@ -21,3 +21,13 @@ genrule(
     out = 'cloudlinux8to9',
     cmd = 'cp $(location :cloudlinux8to9.pex) $OUT && chmod +x $OUT',
 )
+
+python_test(
+    name = 'tests',
+    srcs = glob(['tests/*.py']),
+    deps = [
+        'dist-upgrader//pleskdistup:lib',
+        '//cloudlinux8to9:lib',
+    ],
+    platform = 'py3',
+)

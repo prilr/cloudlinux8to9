@@ -81,7 +81,7 @@ class PleskMainRepoTemporary(action.ActiveAction):
         self._create_temporary_plesk_repo(repofiles, self.repo_filepath)
         # We need this update since plesk installer will not upgrade "same-version" packages
         # so these packages might be stuck at old DSA/SHA1 signed
-        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=elevate"])
+        util.logged_check_call(["/usr/bin/dnf", "-y", "update", "--disablerepo=cloudlinux-elevate"])
         return action.ActionResult()
 
     def _post_action(self) -> action.ActionResult:
@@ -110,7 +110,7 @@ class LeappReposConfiguration(action.ActiveAction):
             "PLESK_17_PHP52", "PLESK_17_PHP53", "PLESK_17_PHP54", "PLESK_17_PHP55"],
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         return action.ActionResult()

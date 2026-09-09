@@ -161,7 +161,7 @@ class AssertModernPostgresRepositoryFilePresent(action.CheckAction):
     def __init__(self):
         self.name = "checking the modern postgresql repository file is present"
         self.description = f"""A modern PostgreSQL is installed, but its repository file {_POSTGRES_REPO_FILE!r} is missing.
-\tWithout it the conversion cannot reinstall PostgreSQL on AlmaLinux 9 and the packages would be removed silently.
+\tWithout it the conversion cannot reinstall PostgreSQL on CloudLinux 9 and the packages would be removed silently.
 \tPlease either place the PostgreSQL repository file at {_POSTGRES_REPO_FILE}, or remove PostgreSQL before the conversion.
 """
 
@@ -201,7 +201,7 @@ class PostgresReinstallModernPackage(action.ActiveAction):
                                                do_adapt_repository=partial(get_adapted_repository, keep_id=False),
                                                skip_disabled=True,
                                                mapjson_path=leapp_configs.LEAPP_MAP_JSON_PATH,
-                                               distro="almalinux",
+                                               distro="cloudlinux",
                                                source_major_version="8",
                                                target_major_version="9")
         for major_version in self._get_versions():

@@ -1,9 +1,9 @@
-# Convert a AlmaLinux 8 server with Plesk to AlmaLinux 9
+# Convert a CloudLinux 8 server with Plesk to CloudLinux 9
 
-AlmaLinux 8 to 9 conversion tool
+CloudLinux 8 to 9 conversion tool
 
 ## Introduction
-This script is the official tool for converting a AlmaLinux 8 server with Plesk to AlmaLinux 9. It uses the [AlmaLinux Elevate tool](https://repo.almalinux.org/elevate/), which is based on the [leapp modernization framework](https://leapp.readthedocs.io/en/latest/). The script includes additional repository and configuration support provided by Plesk.
+This script is the official tool for converting a CloudLinux 8 server with Plesk to CloudLinux 9. It uses the [CloudLinux Elevate tool](https://cloudlinux.com/elevate/), which is based on the [leapp modernization framework](https://leapp.readthedocs.io/en/latest/). The script includes additional repository and configuration support provided by Plesk.
 
 ## Preparation
 To avoid downtime and data loss, make sure you have read and understood the following information before using the script:
@@ -21,9 +21,9 @@ The conversion process should run between 50 and 80 minutes. **Plesk services, h
 ## Known issues
 ### Blockers
 Do not use the script if any of the following is true:
-- **You are running an OS other than AlmaLinux 8.9**. The script was not tested on other Red Hat Enterprise Linux 8-based distributions. The conversion process may have unexpected results if started on a server not running AlmaLinux 8.9. So we add checks to avoid any actions on such kinds of servers.
+- **You are running an OS other than CloudLinux 8.10**. The script was not tested on other Red Hat Enterprise Linux 8-based distributions. The conversion process may have unexpected results if started on a server not running CloudLinux 8.10. So we add checks to avoid any actions on such kinds of servers.
 - **Plesk version is more than five releases behind the latest version**. The script is only compatible with the most recent versions of Plesk. It will prevent conversion if Plesk version is outdated.
-- **PHP 5.5 and earlier are not supported** in AlmaLinux 9, and will not receive any updates after the conversion. These PHP versions are deprecated and may have security vulnerabilities. So we force to remove this versions before the conversion.
+- **PHP 5.5 and earlier are not supported** in CloudLinux 9, and will not receive any updates after the conversion. These PHP versions are deprecated and may have security vulnerabilities. So we force to remove this versions before the conversion.
 - **Conversion inside containers (like Virtuozzo containers, Docker Containers, etc) are not supported**. 
 - **More than one kernel named interfaces (like ethX) are not supported**. Stability of such names are not guaranteed, so leapp prevent the conversion in such cases.
 
@@ -31,7 +31,7 @@ Do not use the script if any of the following is true:
 - Plesk version is not older than five releases back from the latest version
 - PHP-7.1, 7.2, and 7.3 is not supported (for now), so conversion will be refused once one of them is installed
 - Webalizer web statistics absence. It's not supported in target OS and should be switched to another Plesk-supported stats tool
-- AlmaLinux 8.9 or later.
+- CloudLinux 8.10 or later.
 - grub2 is installed
 - At least 5 GB of free disk space.
 - At least 1 GB of RAM.
@@ -41,7 +41,7 @@ To retrieve the latest available version of the tool, please navigate to the "Re
 
 To prepare the latest version of the tool for use from a command line, please run the following commands:
 ```shell
-> wget https://github.com/plesk/cloudlinux8to9/releases/download/v1.6.0/cloudlinux8to9.zip
+> wget https://github.com/plesk/cloudlinux8to9/releases/download/v1.0.0/cloudlinux8to9.zip
 > unzip cloudlinux8to9.zip
 > chmod 755 cloudlinux8to9
 ```
@@ -70,13 +70,13 @@ And monitor its status with the '--status' or '--monitor' flags:
 
 
 This will start the conversion process. During the process, Plesk services will stop, and hosted websites will not be accessible. At the end of the preparation stage, the server will reboot.
-Next, a temporary OS distribution will be used to convert your AlmaLinux 8 system to AlmaLinux 9. This process will take approximately 20 minutes. Once completed, the server will reboot once more. The cloudlinux8to9 script will then perform the final stages of reconfiguring and restoring Plesk-related services, configurations, and databases. This will take some time, depending on the number of hosted websites.
+Next, a temporary OS distribution will be used to convert your CloudLinux 8 system to CloudLinux 9. This process will take approximately 20 minutes. Once completed, the server will reboot once more. The cloudlinux8to9 script will then perform the final stages of reconfiguring and restoring Plesk-related services, configurations, and databases. This will take some time, depending on the number of hosted websites.
 Once the process is complete, the cloudlinux8to9 script will reboot the server one last time. After that, Plesk should return to normal operation.
 On the next SSH login, you will be greeted with the following message:
 ```
 ===============================================================================
 Message from the Plesk cloudlinux8to9 tool:
-The server has been converted to AlmaLinux 9.
+The server has been converted to CloudLinux 9.
 You can remove this message from the /etc/motd file.
 ===============================================================================
 ```
@@ -84,7 +84,7 @@ You can remove this message from the /etc/motd file.
 ### Conversion stage options
 The conversion process consists of two stage options: "start", and "finish":
 1. The "start" stage installs and configures ELevate, disables Plesk services and runs ELevate. It then stops Plesk services and reboots the server.
-2. The "finish" stage must be called automatically on the first boot of AlmaLinux 9. You can rerun this stage if something goes wrong during the first boot to ensure that the problem is fixed and Plesk is ready to use.
+2. The "finish" stage must be called automatically on the first boot of CloudLinux 9. You can rerun this stage if something goes wrong during the first boot to ensure that the problem is fixed and Plesk is ready to use.
 
 During each phase a conversion plan consisting of stages, which in turn consist of actions, is executed. You can see the general stages in the `--help` output and the detailed plan in the `--show-plan` output.
 
@@ -147,7 +147,7 @@ If something goes wrong during the finish stage, you will be informed on the nex
 ```
 ===============================================================================
 Message from Plesk cloudlinux8to9 tool:
-Something went wrong during the final stage of AlmaLinux 8 to AlmaLinux 9 conversion
+Something went wrong during the final stage of CloudLinux 8 to CloudLinux 9 conversion
 See the /var/log/plesk/cloudlinux8to9.log file for more information.
 You can remove this message from the /etc/motd file.
 ===============================================================================
